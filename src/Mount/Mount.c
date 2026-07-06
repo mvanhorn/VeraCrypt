@@ -3576,6 +3576,19 @@ static void UpdatePasswordDlgPasswordLabel (HWND hwndDlg)
 {
 	SetDlgItemTextW (hwndDlg, IDT_PASSWORD,
 		GetString (!PasswordDialogDisableMountOptions && mountOptions.ProtectHiddenVolume ? "IDT_OUTER_VOL_PASSWORD" : "IDT_PASSWORD"));
+
+	if (!PasswordDialogDisableMountOptions && mountOptions.ProtectHiddenVolume)
+	{
+		EDITBALLOONTIP ebt;
+		ebt.cbStruct = sizeof (EDITBALLOONTIP);
+		ebt.pszText = GetString ("HIDVOL_PROT_OUTER_CREDENTIALS_NOTE");
+		ebt.pszTitle = GetString ("IDT_HIDDEN_VOL_PROTECTION");
+		ebt.ttiIcon = TTI_INFO_LARGE;
+
+		SendMessage (GetDlgItem (hwndDlg, IDC_PASSWORD), EM_SHOWBALLOONTIP, 0, (LPARAM) &ebt);
+	}
+	else
+		SendMessage (GetDlgItem (hwndDlg, IDC_PASSWORD), EM_HIDEBALLOONTIP, 0, 0);
 }
 
 /* Except in response to the WM_INITDIALOG message, the dialog box procedure
@@ -3597,7 +3610,6 @@ BOOL CALLBACK PasswordDlgProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPa
 			pkcs5 = ((PasswordDlgParam *) lParam) -> pkcs5;
 			pim = ((PasswordDlgParam *) lParam) -> pim;
 			LocalizeDialog (hwndDlg, "IDD_PASSWORD_DLG");
-			UpdatePasswordDlgPasswordLabel (hwndDlg);
 			DragAcceptFiles (hwndDlg, TRUE);
 
 			if (PasswordDialogTitleStringId)
@@ -3646,6 +3658,7 @@ BOOL CALLBACK PasswordDlgProc (HWND hwndDlg, UINT msg, WPARAM wParam, LPARAM lPa
 			SendMessage (hComboBox, CB_SETCURSEL, defaultPrfIndex, 0);
 
 			ToNormalPwdField (hwndDlg, IDC_PASSWORD);
+			UpdatePasswordDlgPasswordLabel (hwndDlg);
 			SendMessage (GetDlgItem (hwndDlg, IDC_CACHE), BM_SETCHECK, bCacheInDriver ? BST_CHECKED:BST_UNCHECKED, 0);
 			SendMessage (GetDlgItem (hwndDlg, IDC_PIM), EM_LIMITTEXT, MAX_PIM, 0);
 
