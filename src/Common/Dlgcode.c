@@ -5760,12 +5760,15 @@ static std::wstring GetWrongPasswordErrorMessageEx (HWND hwndDlg, BOOL hiddenVol
 	wchar_t szDevicePath [TC_MAX_PATH+1] = {0};
 	GetWindowText (GetDlgItem (MainDlg, IDC_VOLUME), szDevicePath, ARRAYSIZE (szDevicePath));
 
-	if (!hiddenVolumeProtection && TCBootLoaderOnInactiveSysEncDrive (szDevicePath))
+	if (TCBootLoaderOnInactiveSysEncDrive (szDevicePath))
 	{
-		StringCbPrintfW (szTmp, sizeof(szTmp), GetString (KeyFilesEnable ? "PASSWORD_OR_KEYFILE_OR_MODE_WRONG" : "PASSWORD_OR_MODE_WRONG"));
+		if (!hiddenVolumeProtection)
+		{
+			StringCbPrintfW (szTmp, sizeof(szTmp), GetString (KeyFilesEnable ? "PASSWORD_OR_KEYFILE_OR_MODE_WRONG" : "PASSWORD_OR_MODE_WRONG"));
 
-		if (CheckCapsLock (hwndDlg, TRUE))
-			StringCbCatW (szTmp, sizeof(szTmp), GetString ("PASSWORD_WRONG_CAPSLOCK_ON"));
+			if (CheckCapsLock (hwndDlg, TRUE))
+				StringCbCatW (szTmp, sizeof(szTmp), GetString ("PASSWORD_WRONG_CAPSLOCK_ON"));
+		}
 
 		StringCbCatW (szTmp, sizeof(szTmp), GetString ("SYSENC_MOUNT_WITHOUT_PBA_NOTE"));
 	}
@@ -9608,7 +9611,7 @@ retry:
 					}
 
 					if (!passwordErrorMessageShown)
-						MessageBoxW (hwndDlg, AppendSrcPos (GetWrongPasswordErrorMessageEx (hwndDlg, TRUE).c_str(), SRC_POS).c_str(), lpszTitle, MB_ICONWARNING);
+						WarningDirect (AppendSrcPos (GetWrongPasswordErrorMessageEx (hwndDlg, TRUE).c_str(), SRC_POS).c_str(), hwndDlg);
 				}
 				else
 					handleError (hwndDlg, mount.nReturnCode, SRC_POS);
