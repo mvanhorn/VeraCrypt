@@ -3574,21 +3574,25 @@ static char *PasswordDialogTitleStringId;
 
 static void UpdatePasswordDlgPasswordLabel (HWND hwndDlg)
 {
-	SetDlgItemTextW (hwndDlg, IDT_PASSWORD,
-		GetString (!PasswordDialogDisableMountOptions && mountOptions.ProtectHiddenVolume ? "IDT_OUTER_VOL_PASSWORD" : "IDT_PASSWORD"));
+	BOOL hiddenVolumeProtection = !PasswordDialogDisableMountOptions && mountOptions.ProtectHiddenVolume;
+	HWND credentialsNote = GetDlgItem (hwndDlg, HIDVOL_PROT_OUTER_CREDENTIALS_NOTE);
+	BOOL credentialsNoteVisible = (GetWindowLongPtr (credentialsNote, GWL_STYLE) & WS_VISIBLE) != 0;
 
-	if (!PasswordDialogDisableMountOptions && mountOptions.ProtectHiddenVolume)
+	SetDlgItemTextW (hwndDlg, IDT_PASSWORD, GetString (hiddenVolumeProtection ? "IDT_OUTER_VOL_PASSWORD" : "IDT_PASSWORD"));
+
+	if (hiddenVolumeProtection != credentialsNoteVisible)
 	{
-		EDITBALLOONTIP ebt;
-		ebt.cbStruct = sizeof (EDITBALLOONTIP);
-		ebt.pszText = GetString ("HIDVOL_PROT_OUTER_CREDENTIALS_NOTE");
-		ebt.pszTitle = GetString ("IDT_HIDDEN_VOL_PROTECTION");
-		ebt.ttiIcon = TTI_INFO_LARGE;
+		RECT dialogRect;
+		RECT sizeChange = { 0, 0, 0, 23 };
+		MapDialogRect (hwndDlg, &sizeChange);
+		GetWindowRect (hwndDlg, &dialogRect);
 
-		SendMessage (GetDlgItem (hwndDlg, IDC_PASSWORD), EM_SHOWBALLOONTIP, 0, (LPARAM) &ebt);
+		ShowWindow (credentialsNote, hiddenVolumeProtection ? SW_SHOW : SW_HIDE);
+		SetWindowPos (hwndDlg, NULL,
+			dialogRect.left, dialogRect.top + (hiddenVolumeProtection ? -sizeChange.bottom / 2 : sizeChange.bottom / 2),
+			dialogRect.right - dialogRect.left, dialogRect.bottom - dialogRect.top + (hiddenVolumeProtection ? sizeChange.bottom : -sizeChange.bottom),
+			SWP_NOACTIVATE | SWP_NOZORDER);
 	}
-	else
-		SendMessage (GetDlgItem (hwndDlg, IDC_PASSWORD), EM_HIDEBALLOONTIP, 0, 0);
 }
 
 /* Except in response to the WM_INITDIALOG message, the dialog box procedure
