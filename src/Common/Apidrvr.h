@@ -85,8 +85,7 @@
 // TODO: need IOCTL_DISK_GET_PARTITION_INFO_EX to support GPT
 #define TC_IOCTL_GET_DRIVE_PARTITION_INFO				TC_IOCTL (14)
 
-// result IOCTL_DISK_GET_DRIVE_GEOMETRY
-// IN OUT - DISK_GEOMETRY_STRUCT
+// Legacy IOCTL number retained for compatibility, the driver handler has been removed.
 #define TC_IOCTL_GET_DRIVE_GEOMETRY						TC_IOCTL (15)
 
 // result IOCTL_DISK_GET_LENGTH_INFO
@@ -254,7 +253,7 @@ typedef struct
 	WCHAR deviceName[TC_MAX_PATH];
 	DISK_GEOMETRY diskGeometry;
 }
-DISK_GEOMETRY_STRUCT;
+DISK_GEOMETRY_STRUCT; // unused legacy structure, retained for compatibility.
 
 typedef struct
 {

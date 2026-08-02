@@ -232,16 +232,26 @@ namespace VeraCrypt
 		std::wstring BootVolumePath;
 	};
 
-	// Trust facts about the installed EFI boot chain, derived from the active Secure Boot db.
-	// Only valid when StatusKnown is true: partial or malformed firmware data never asserts facts.
+	// Known-CA compatibility facts for the installed EFI boot chain. UEFI dbx can
+	// also revoke individual image hashes, certificate TBS hashes, or security
+	// versions, so these fields deliberately do not claim complete firmware trust.
 	struct EfiBootChainTrustStatus
 	{
-		bool StatusKnown;              // Secure Boot state read and firmware db parsed completely
+		bool StatusKnown;              // Secure Boot state read and firmware db/dbx CA entries parsed completely
 		bool SecureBootEnabled;
-		bool VeraCryptLoaderTrusted;   // signing CA(s) of the installed VeraCrypt EFI loader set found in db
-		bool WindowsLoaderSignerKnown; // signer family of EFI\Microsoft\Boot\bootmgfw_ms.vc identified
-		bool WindowsLoaderTrusted;     // signing CA of bootmgfw_ms.vc found in db
-		DWORD InstalledResourceSet;    // VC_EFI_BOOT_LOADER_RESOURCE_SET_2011 or VC_EFI_BOOT_LOADER_RESOURCE_SET_2023
+		bool FirmwareDbxPresent;       // false is valid and means the optional dbx variable is absent
+		bool VeraCryptLoaderFilesValid; // installed DCS files and any VeraCrypt standard-path copies match one embedded set
+		bool VeraCryptLoaderKnownCaAllowed; // required signing CA(s) found in db and no matching CA found in dbx
+		bool VeraCryptLoaderKnownCaRevoked; // at least one required signing CA found in dbx
+		bool WindowsLoaderInspectionSucceeded; // file read and embedded Authenticode signature parsed
+		bool WindowsLoaderPresent;     // EFI\Microsoft\Boot\bootmgfw_ms.vc exists
+		bool WindowsLoaderSignerKnown; // embedded signer family of bootmgfw_ms.vc identified
+		bool WindowsLoaderKnownCaAllowed; // signing CA found in db and no matching CA found in dbx
+		bool WindowsLoaderKnownCaRevoked; // signing CA of bootmgfw_ms.vc found in dbx
+		bool WindowsLoaderMigrationRecommended; // PCA 2011 copy remains while Windows UEFI CA 2023 is available
+		DWORD WindowsLoaderSigner;     // VC_EFI_WINDOWS_LOADER_SIGNER_* value
+		DWORD InstalledResourceSet;    // resource set identified from the actual installed DCS files
+		DWORD RecordedResourceSet;     // last resource set recorded at installation/refresh time
 	};
 
 	class BootEncryption

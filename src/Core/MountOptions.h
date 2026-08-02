@@ -40,7 +40,8 @@ namespace VeraCrypt
 			Removable (false),
 			SharedAccessAllowed (false),
 			SlotNumber (0),
-			UseBackupHeaders (false)
+			UseBackupHeaders (false),
+			EMVSupportEnabled (false)
 		{
 		}
 

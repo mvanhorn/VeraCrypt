@@ -10862,7 +10862,7 @@ static void SystemFavoritesServiceLogBootLoaderUpdateError (const wchar_t *opera
 {
 	if (IsUnsupportedEfiSecureBootDbException (e))
 	{
-		SystemFavoritesServiceLogError (wstring (operation) + L" failed: Secure Boot is enabled, but the firmware Secure Boot db does not trust any Microsoft UEFI CA set supported by VeraCrypt. See HKLM\\SOFTWARE\\VeraCrypt\\Diagnostics\\EfiBootLoader for the recorded selection reason.");
+		SystemFavoritesServiceLogError (wstring (operation) + L" failed: Secure Boot is enabled, but the firmware Secure Boot db/dbx policy does not permit a Microsoft UEFI CA set supported by VeraCrypt, or the policy could not be read completely. See HKLM\\SOFTWARE\\VeraCrypt\\Diagnostics\\EfiBootLoader for the recorded selection reason.");
 		return;
 	}
 
@@ -10907,6 +10907,15 @@ static BOOL GetSystemFavoritesServiceBootLoaderUpdateOptions (uint32 serviceFlag
 	return TRUE;
 }
 
+enum
+{
+	VC_EFI_BOOT_CHAIN_WARNING_VERACRYPT_LOADER = 0x01,
+	VC_EFI_BOOT_CHAIN_WARNING_WINDOWS_LOADER = 0x02,
+	VC_EFI_BOOT_CHAIN_WARNING_WINDOWS_MIGRATION = 0x04
+};
+
+static DWORD SystemFavoritesServiceLastEfiBootChainWarningMask = MAXDWORD;
+
 static void SystemFavoritesServiceUpdateLoaderProcessing (BOOL bForce)
 {
 	SystemFavoritesServiceLogInfo (L"SystemFavoritesServiceUpdateLoaderProcessing called");
@@ -10927,18 +10936,39 @@ static void SystemFavoritesServiceUpdateLoaderProcessing (BOOL bForce)
 				bootEnc.InstallBootLoader (true);
 				SystemFavoritesServiceLogInfo (L"SystemFavoritesServiceUpdateLoaderProcessing: InstallBootLoader called");
 
-				// Record in the event log when the active Secure Boot db no longer trusts a
-				// component of the boot chain (e.g. after a Secure Boot certificate update),
-				// so that a subsequent pre-boot failure can be diagnosed from Windows.
+				// Record actual-file and known-CA compatibility failures so a subsequent
+				// firmware-enforced pre-boot failure can be diagnosed from Windows.
 				try
 				{
 					EfiBootChainTrustStatus trustStatus;
-					if (bootEnc.GetEfiBootChainTrustStatus (trustStatus) && trustStatus.StatusKnown && trustStatus.SecureBootEnabled)
+					if (bootEnc.GetEfiBootChainTrustStatus (trustStatus))
 					{
-						if (!trustStatus.VeraCryptLoaderTrusted)
-							SystemFavoritesServiceLogWarning (L"Secure Boot chain check: the firmware Secure Boot db does not trust the Microsoft UEFI CA that signs the installed VeraCrypt EFI bootloader. Pre-boot authentication may fail at the next reboot.");
-						else if (trustStatus.WindowsLoaderSignerKnown && !trustStatus.WindowsLoaderTrusted)
-							SystemFavoritesServiceLogWarning (L"Secure Boot chain check: the firmware Secure Boot db does not trust the Microsoft CA that signs the Windows boot manager copy used by VeraCrypt (bootmgfw_ms.vc). The handoff to Windows after pre-boot authentication may fail at the next reboot.");
+						DWORD warningMask = 0;
+						if (!trustStatus.StatusKnown
+							|| !trustStatus.VeraCryptLoaderFilesValid
+							|| !trustStatus.VeraCryptLoaderKnownCaAllowed)
+							warningMask |= VC_EFI_BOOT_CHAIN_WARNING_VERACRYPT_LOADER;
+						if (trustStatus.StatusKnown && (!trustStatus.WindowsLoaderInspectionSucceeded
+							|| !trustStatus.WindowsLoaderPresent
+							|| !trustStatus.WindowsLoaderSignerKnown
+							|| !trustStatus.WindowsLoaderKnownCaAllowed))
+							warningMask |= VC_EFI_BOOT_CHAIN_WARNING_WINDOWS_LOADER;
+						else if (trustStatus.StatusKnown && trustStatus.WindowsLoaderMigrationRecommended)
+							warningMask |= VC_EFI_BOOT_CHAIN_WARNING_WINDOWS_MIGRATION;
+
+						// The service refreshes the loader at several lifecycle events. Emit each
+						// unchanged warning state only once per service process to avoid log spam.
+						if (warningMask != SystemFavoritesServiceLastEfiBootChainWarningMask)
+						{
+							if (warningMask & VC_EFI_BOOT_CHAIN_WARNING_VERACRYPT_LOADER)
+								SystemFavoritesServiceLogWarning (L"Secure Boot compatibility check: VeraCrypt could not validate the installed DCS files against an embedded loader set and confirm that its known signing CAs are allowed by db and not listed by dbx. Do not boot with Secure Boot enabled until the policy and loader set have been repaired.");
+							if (warningMask & VC_EFI_BOOT_CHAIN_WARNING_WINDOWS_LOADER)
+								SystemFavoritesServiceLogWarning (L"Secure Boot compatibility check: the Windows boot manager used by VeraCrypt (bootmgfw_ms.vc) is missing or unreadable, its embedded signer is unrecognized, or its known signing CA is not allowed by db or is listed by dbx. The handoff to Windows may fail when Secure Boot is enabled.");
+							else if (warningMask & VC_EFI_BOOT_CHAIN_WARNING_WINDOWS_MIGRATION)
+								SystemFavoritesServiceLogWarning (L"Secure Boot transition check: bootmgfw_ms.vc is still signed by Microsoft Windows Production PCA 2011 although firmware db already contains Windows UEFI CA 2023. Complete the Windows 2023 boot manager update before applying the PCA 2011 dbx revocation.");
+
+							SystemFavoritesServiceLastEfiBootChainWarningMask = warningMask;
+						}
 					}
 				}
 				catch (...) { }

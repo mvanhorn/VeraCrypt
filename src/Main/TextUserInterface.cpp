@@ -1466,7 +1466,7 @@ namespace VeraCrypt
 		}
 	}
 
-	shared_ptr <VolumeInfo> TextUserInterface::MountVolume (MountOptions &options) const
+	shared_ptr <VolumeInfo> TextUserInterface::MountVolume (MountOptions &options, bool tryCachedPasswords) const
 	{
 		shared_ptr <VolumeInfo> volume;
 
@@ -1508,7 +1508,8 @@ namespace VeraCrypt
 
 		options.EMVSupportEnabled = true;
 
-		if ((!options.Password || options.Password->IsEmpty())
+		if (tryCachedPasswords
+			&& (!options.Password || options.Password->IsEmpty())
 			&& (!options.Keyfiles || options.Keyfiles->empty())
 			&& !Core->IsPasswordCacheEmpty())
 		{

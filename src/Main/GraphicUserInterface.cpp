@@ -904,7 +904,7 @@ namespace VeraCrypt
 		}
 	}
 
-	shared_ptr <VolumeInfo> GraphicUserInterface::MountVolume (MountOptions &options) const
+	shared_ptr <VolumeInfo> GraphicUserInterface::MountVolume (MountOptions &options, bool tryCachedPasswords) const
 	{
 		CheckRequirementsForMountingVolume();
 
@@ -937,7 +937,8 @@ namespace VeraCrypt
 
 		try
 		{
-			if ((!options.Password || options.Password->IsEmpty())
+			if (tryCachedPasswords
+				&& (!options.Password || options.Password->IsEmpty())
 				&& (!options.Keyfiles || options.Keyfiles->empty())
 				&& !Core->IsPasswordCacheEmpty())
 			{

@@ -1799,18 +1799,25 @@ BOOL UpgradeBootLoader (HWND hwndDlg)
 
 			bootEnc.InstallBootLoader (true);
 
-			// Verify the whole boot chain against the active Secure Boot db before the user
-			// reboots: a component that the firmware no longer trusts (e.g. after a Secure Boot
-			// certificate update) would otherwise only surface as a pre-boot failure.
+			// Validate the actual boot files and their known-CA compatibility with the active
+			// Secure Boot db/dbx before the user reboots. Other dbx revocation forms remain
+			// firmware-enforced and cannot be completely predicted here.
 			try
 			{
 				EfiBootChainTrustStatus trustStatus;
-				if (bootEnc.GetEfiBootChainTrustStatus (trustStatus) && trustStatus.StatusKnown && trustStatus.SecureBootEnabled)
+				if (bootEnc.GetEfiBootChainTrustStatus (trustStatus))
 				{
-					if (!trustStatus.VeraCryptLoaderTrusted)
+					if (!trustStatus.StatusKnown)
+						Warning ("SYSENC_EFI_UNSUPPORTED_SECUREBOOT_CA", hwndDlg);
+					else if (!trustStatus.VeraCryptLoaderFilesValid || !trustStatus.VeraCryptLoaderKnownCaAllowed)
 						Warning ("SYSENC_EFI_LOADER_NOT_TRUSTED_BY_SECUREBOOT", hwndDlg);
-					else if (trustStatus.WindowsLoaderSignerKnown && !trustStatus.WindowsLoaderTrusted)
+					if (trustStatus.StatusKnown && (!trustStatus.WindowsLoaderInspectionSucceeded
+						|| !trustStatus.WindowsLoaderPresent
+						|| !trustStatus.WindowsLoaderSignerKnown
+						|| !trustStatus.WindowsLoaderKnownCaAllowed))
 						Warning ("SYSENC_EFI_WINDOWS_LOADER_NOT_TRUSTED_BY_SECUREBOOT", hwndDlg);
+					else if (trustStatus.StatusKnown && trustStatus.WindowsLoaderMigrationRecommended)
+						Warning ("SYSENC_EFI_WINDOWS_LOADER_PCA2011_MIGRATION_NEEDED", hwndDlg);
 				}
 			}
 			catch (...) { }

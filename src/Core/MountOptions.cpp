@@ -55,6 +55,7 @@ namespace VeraCrypt
 		TC_CLONE (SharedAccessAllowed);
 		TC_CLONE (SlotNumber);
 		TC_CLONE (UseBackupHeaders);
+		TC_CLONE (EMVSupportEnabled);
 	}
 
 	void MountOptions::Deserialize (shared_ptr <Stream> stream)
@@ -105,6 +106,7 @@ namespace VeraCrypt
 		sr.Deserialize ("SharedAccessAllowed", SharedAccessAllowed);
 		sr.Deserialize ("SlotNumber", SlotNumber);
 		sr.Deserialize ("UseBackupHeaders", UseBackupHeaders);
+		sr.Deserialize ("EMVSupportEnabled", EMVSupportEnabled);
 
 		try
 		{
@@ -172,6 +174,7 @@ namespace VeraCrypt
 		sr.Serialize ("SharedAccessAllowed", SharedAccessAllowed);
 		sr.Serialize ("SlotNumber", SlotNumber);
 		sr.Serialize ("UseBackupHeaders", UseBackupHeaders);
+		sr.Serialize ("EMVSupportEnabled", EMVSupportEnabled);
 
 		sr.Serialize ("KdfNull", Kdf == nullptr);
 		if (Kdf)

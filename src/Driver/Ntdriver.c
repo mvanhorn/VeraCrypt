@@ -463,6 +463,113 @@ static BOOL CheckStringLength (const wchar_t* str, size_t cchSize, size_t minLen
 	return TRUE;
 }
 
+
+/* Exact object-manager path grammars accepted from user mode by metadata IOCTLs. */
+static BOOL ConsumePathLiteral (const wchar_t **path, const wchar_t *literal)
+{
+	const wchar_t *current = *path;
+
+	while (*literal)
+	{
+		if (!*current || UpperCaseUnicodeChar (*current) != UpperCaseUnicodeChar (*literal))
+			return FALSE;
+
+		++current;
+		++literal;
+	}
+
+	*path = current;
+	return TRUE;
+}
+
+
+static BOOL ConsumeDecimalNumber (const wchar_t **path, ULONG *value)
+{
+	const wchar_t *current = *path;
+	ULONG number = 0;
+
+	if (*current < L'0' || *current > L'9')
+		return FALSE;
+
+	do
+	{
+		ULONG digit = (ULONG) (*current - L'0');
+
+		if (number > (MAXULONG - digit) / 10)
+			return FALSE;
+
+		number = number * 10 + digit;
+		++current;
+	} while (*current >= L'0' && *current <= L'9');
+
+	*path = current;
+	if (value)
+		*value = number;
+
+	return TRUE;
+}
+
+
+static BOOL IsHarddiskPartitionPath (const wchar_t *path, BOOL partitionZeroOnly)
+{
+	const wchar_t *current = path;
+	ULONG partitionNumber;
+
+	if (!path
+		|| !ConsumePathLiteral (&current, L"\\Device\\Harddisk")
+		|| !ConsumeDecimalNumber (&current, NULL)
+		|| !ConsumePathLiteral (&current, L"\\Partition")
+		|| !ConsumeDecimalNumber (&current, &partitionNumber)
+		|| *current != 0)
+	{
+		return FALSE;
+	}
+
+	return !partitionZeroOnly || partitionNumber == 0;
+}
+
+
+static BOOL IsHarddiskVolumePath (const wchar_t *path)
+{
+	const wchar_t *current = path;
+
+	return path
+		&& ConsumePathLiteral (&current, L"\\Device\\HarddiskVolume")
+		&& ConsumeDecimalNumber (&current, NULL)
+		&& *current == 0;
+}
+
+
+static BOOL IsDriveLetterSymbolicLinkPath (const wchar_t *path)
+{
+	const wchar_t *current = path;
+
+	if (!path)
+		return FALSE;
+
+	if (!ConsumePathLiteral (&current, L"\\DosDevices\\"))
+	{
+		current = path;
+		if (!ConsumePathLiteral (&current, L"\\??\\"))
+			return FALSE;
+	}
+
+	return ((current[0] >= L'A' && current[0] <= L'Z')
+			|| (current[0] >= L'a' && current[0] <= L'z'))
+		&& current[1] == L':'
+		&& current[2] == 0;
+}
+
+
+static BOOL IsAllowedDevicePathForMetadata (const wchar_t *path, BOOL symbolicLink)
+{
+	if (IsHarddiskPartitionPath (path, FALSE))
+		return TRUE;
+
+	return symbolicLink ? IsDriveLetterSymbolicLinkPath (path) : IsHarddiskVolumePath (path);
+}
+
+
 BOOL ValidateIOBufferSize (PIRP irp, size_t requiredBufferSize, ValidateIOBufferSizeType type)
 {
 	PIO_STACK_LOCATION irpSp = IoGetCurrentIrpStackLocation (irp);
@@ -2588,6 +2695,12 @@ NTSTATUS ProcessMainDeviceControlIrp (PDEVICE_OBJECT DeviceObject, PEXTENSION Ex
 				NTSTATUS ntStatusLocal;
 
 				EnsureNullTerminatedString (resolve->symLinkName, sizeof (resolve->symLinkName));
+				if (!IsAllowedDevicePathForMetadata (resolve->symLinkName, TRUE))
+				{
+					Irp->IoStatus.Information = 0;
+					Irp->IoStatus.Status = STATUS_INVALID_PARAMETER;
+					break;
+				}
 
 				ntStatusLocal = SymbolicLinkToTarget (resolve->symLinkName,
 					resolve->targetName,
@@ -2608,6 +2721,12 @@ NTSTATUS ProcessMainDeviceControlIrp (PDEVICE_OBJECT DeviceObject, PEXTENSION Ex
 				NTSTATUS ntStatusLocal;
 
 				EnsureNullTerminatedString (info->deviceName, sizeof (info->deviceName));
+				if (!IsAllowedDevicePathForMetadata (info->deviceName, FALSE))
+				{
+					Irp->IoStatus.Information = 0;
+					Irp->IoStatus.Status = STATUS_INVALID_PARAMETER;
+					break;
+				}
 
 				ntStatusLocal = TCDeviceIoControl (info->deviceName, IOCTL_DISK_GET_PARTITION_INFO_EX, NULL, 0, &pi, sizeof (pi));
 				if (NT_SUCCESS(ntStatusLocal))
@@ -2660,36 +2779,25 @@ NTSTATUS ProcessMainDeviceControlIrp (PDEVICE_OBJECT DeviceObject, PEXTENSION Ex
 		}
 		break;
 
-	case TC_IOCTL_GET_DRIVE_GEOMETRY:
-		if (ValidateIOBufferSize (Irp, sizeof (DISK_GEOMETRY_STRUCT), ValidateInputOutput))
-		{
-			DISK_GEOMETRY_STRUCT *g = (DISK_GEOMETRY_STRUCT *) Irp->AssociatedIrp.SystemBuffer;
-			{
-				NTSTATUS ntStatusLocal;
-
-				EnsureNullTerminatedString (g->deviceName, sizeof (g->deviceName));
-				Dump ("Calling IOCTL_DISK_GET_DRIVE_GEOMETRY on %ls\n", g->deviceName);
-
-				ntStatusLocal = TCDeviceIoControl (g->deviceName,
-					IOCTL_DISK_GET_DRIVE_GEOMETRY,
-					NULL, 0, &g->diskGeometry, sizeof (g->diskGeometry));
-
-				Irp->IoStatus.Information = sizeof (DISK_GEOMETRY_STRUCT);
-				Irp->IoStatus.Status = ntStatusLocal;
-			}
-		}
-		break;
-
 	case VC_IOCTL_GET_DRIVE_GEOMETRY_EX:
 		if (ValidateIOBufferSize (Irp, sizeof (DISK_GEOMETRY_EX_STRUCT), ValidateInputOutput))
 		{
 			DISK_GEOMETRY_EX_STRUCT *g = (DISK_GEOMETRY_EX_STRUCT *) Irp->AssociatedIrp.SystemBuffer;
 			{
 				NTSTATUS ntStatusLocal;
-				PVOID buffer = TCalloc (256); // enough for DISK_GEOMETRY_EX and padded data
+				PVOID buffer;
+
+				EnsureNullTerminatedString (g->deviceName, sizeof (g->deviceName));
+				if (!IsAllowedDevicePathForMetadata (g->deviceName, FALSE))
+				{
+					Irp->IoStatus.Information = 0;
+					Irp->IoStatus.Status = STATUS_INVALID_PARAMETER;
+					break;
+				}
+
+				buffer = TCalloc (256); // enough for DISK_GEOMETRY_EX and padded data
 				if (buffer)
 				{
-					EnsureNullTerminatedString (g->deviceName, sizeof (g->deviceName));
 					Dump ("Calling IOCTL_DISK_GET_DRIVE_GEOMETRY_EX on %ls\n", g->deviceName);
 
 					ntStatusLocal = TCDeviceIoControl (g->deviceName,
@@ -2754,7 +2862,20 @@ NTSTATUS ProcessMainDeviceControlIrp (PDEVICE_OBJECT DeviceObject, PEXTENSION Ex
 			PFILE_OBJECT fileObject;
 			PDEVICE_OBJECT deviceObject;
 
+			if (!UserCanAccessDriveDevice())
+			{
+				Irp->IoStatus.Information = 0;
+				Irp->IoStatus.Status = STATUS_ACCESS_DENIED;
+				break;
+			}
+
 			EnsureNullTerminatedString (request->DeviceName, sizeof (request->DeviceName));
+			if (!IsHarddiskPartitionPath (request->DeviceName, TRUE))
+			{
+				Irp->IoStatus.Information = 0;
+				Irp->IoStatus.Status = STATUS_INVALID_PARAMETER;
+				break;
+			}
 
 			RtlInitUnicodeString (&name, request->DeviceName);
 			status = IoGetDeviceObjectPointer (&name, FILE_READ_ATTRIBUTES, &fileObject, &deviceObject);
@@ -2886,7 +3007,8 @@ NTSTATUS ProcessMainDeviceControlIrp (PDEVICE_OBJECT DeviceObject, PEXTENSION Ex
 
 	case VC_IOCTL_EMERGENCY_CLEAR_ALL_KEYS:
 		EmergencyClearAllKeys (Irp);
-		WipeCache();
+		if (NT_SUCCESS (Irp->IoStatus.Status))
+			WipeCache();
 		break;
 
 	case TC_IOCTL_BOOT_ENCRYPTION_SETUP:
@@ -4508,7 +4630,7 @@ NTSTATUS SymbolicLinkToTarget (PWSTR symlinkName, PWSTR targetName, USHORT maxTa
 	HANDLE handle;
 
 	RtlInitUnicodeString (&fullFileName, symlinkName);
-	InitializeObjectAttributes (&objectAttributes, &fullFileName, OBJ_KERNEL_HANDLE | OBJ_CASE_INSENSITIVE, NULL, NULL);
+	InitializeObjectAttributes (&objectAttributes, &fullFileName, OBJ_KERNEL_HANDLE | OBJ_CASE_INSENSITIVE | OBJ_FORCE_ACCESS_CHECK, NULL, NULL);
 
 	ntStatus = ZwOpenSymbolicLinkObject (&handle, GENERIC_READ, &objectAttributes);
 

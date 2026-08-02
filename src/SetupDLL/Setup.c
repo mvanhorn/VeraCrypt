@@ -1826,9 +1826,8 @@ BOOL UpgradeBootLoader_Dll (MSIHANDLE hInstaller, HWND hwndDlg)
 			// this is done by the service now
 			//bootEnc.InstallBootLoader (true);
 
-			// Verify the installed boot chain against the active Secure Boot db before the user
-			// reboots: a component that the firmware no longer trusts (e.g. after a Secure Boot
-			// certificate update) would otherwise only surface as a pre-boot failure. In the MSI
+			// Validate the installed boot files and their known-CA compatibility with the active
+			// Secure Boot db/dbx before the user reboots. In the MSI
 			// upgrade path, the System Favorites service has already attempted the loader refresh.
 			try
 			{
@@ -1839,12 +1838,19 @@ BOOL UpgradeBootLoader_Dll (MSIHANDLE hInstaller, HWND hwndDlg)
 				else
 				{
 					EfiBootChainTrustStatus trustStatus;
-					if (bootEnc.GetEfiBootChainTrustStatus (trustStatus) && trustStatus.StatusKnown && trustStatus.SecureBootEnabled)
+					if (bootEnc.GetEfiBootChainTrustStatus (trustStatus))
 					{
-						if (!trustStatus.VeraCryptLoaderTrusted)
+						if (!trustStatus.StatusKnown)
+							MSILogAndShow (hInstaller, MSI_WARNING_LEVEL, GetString("SYSENC_EFI_UNSUPPORTED_SECUREBOOT_CA"));
+						else if (!trustStatus.VeraCryptLoaderFilesValid || !trustStatus.VeraCryptLoaderKnownCaAllowed)
 							MSILogAndShow (hInstaller, MSI_WARNING_LEVEL, GetString("SYSENC_EFI_LOADER_NOT_TRUSTED_BY_SECUREBOOT"));
-						else if (trustStatus.WindowsLoaderSignerKnown && !trustStatus.WindowsLoaderTrusted)
+						if (trustStatus.StatusKnown && (!trustStatus.WindowsLoaderInspectionSucceeded
+							|| !trustStatus.WindowsLoaderPresent
+							|| !trustStatus.WindowsLoaderSignerKnown
+							|| !trustStatus.WindowsLoaderKnownCaAllowed))
 							MSILogAndShow (hInstaller, MSI_WARNING_LEVEL, GetString("SYSENC_EFI_WINDOWS_LOADER_NOT_TRUSTED_BY_SECUREBOOT"));
+						else if (trustStatus.StatusKnown && trustStatus.WindowsLoaderMigrationRecommended)
+							MSILogAndShow (hInstaller, MSI_WARNING_LEVEL, GetString("SYSENC_EFI_WINDOWS_LOADER_PCA2011_MIGRATION_NEEDED"));
 					}
 				}
 			}

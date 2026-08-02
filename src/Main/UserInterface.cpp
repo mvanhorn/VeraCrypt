@@ -44,6 +44,30 @@ namespace VeraCrypt
 		}
 	};
 
+	class CloseSecurityTokenSessionsAfterMountScope
+	{
+	public:
+		CloseSecurityTokenSessionsAfterMountScope (bool &preference)
+			: Preference (preference), RestoreValue (preference)
+		{
+			if (RestoreValue)
+				Preference = false;
+		}
+
+		~CloseSecurityTokenSessionsAfterMountScope ()
+		{
+			if (RestoreValue)
+				Preference = true;
+		}
+
+	private:
+		bool &Preference;
+		bool RestoreValue;
+
+		CloseSecurityTokenSessionsAfterMountScope (const CloseSecurityTokenSessionsAfterMountScope &);
+		CloseSecurityTokenSessionsAfterMountScope &operator= (const CloseSecurityTokenSessionsAfterMountScope &);
+	};
+
 	UserInterface::UserInterface ()
 	{
 	}
@@ -792,6 +816,7 @@ namespace VeraCrypt
 	{
 		BusyScope busy (this);
 
+		MountOptions batchOptions (options);
 		VolumeInfoList newMountedVolumes;
 		foreach_ref (const FavoriteVolume &favorite, FavoriteVolume::LoadList())
 		{
@@ -803,13 +828,15 @@ namespace VeraCrypt
 				continue;
 			}
 
-			favorite.ToMountOptions (options);
+			// Keep credentials and KDF/PIM selected for one favorite from leaking into the next one.
+			MountOptions favoriteOptions (batchOptions);
+			favorite.ToMountOptions (favoriteOptions);
 
 			bool mountPerformed = false;
 			if (Preferences.NonInteractive)
 			{
 				BusyScope busy (this);
-				newMountedVolumes.push_back (Core->MountVolume (options));
+				newMountedVolumes.push_back (Core->MountVolume (favoriteOptions));
 				mountPerformed = true;
 			}
 			else
@@ -817,19 +844,26 @@ namespace VeraCrypt
 				try
 				{
 					BusyScope busy (this);
-					newMountedVolumes.push_back (Core->MountVolume (options));
+					newMountedVolumes.push_back (Core->MountVolume (favoriteOptions));
 					mountPerformed = true;
+				}
+				catch (PasswordException&)
+				{
+					CloseSecurityTokenSessionsAfterMountScope closeTokenSessionsScope (Preferences.CloseSecurityTokenSessionsAfterMount);
+
+					// The initial silent mount attempt has already consulted cached passwords.
+					// Avoid repeating the same failed cache sweep before prompting the user.
+					shared_ptr <VolumeInfo> volume = MountVolume (favoriteOptions, false);
+
+					if (!volume)
+						break;
+					newMountedVolumes.push_back (volume);
 				}
 				catch (...)
 				{
-					UserPreferences prefs = GetPreferences();
-					if (prefs.CloseSecurityTokenSessionsAfterMount)
-						Preferences.CloseSecurityTokenSessionsAfterMount = false;
+					CloseSecurityTokenSessionsAfterMountScope closeTokenSessionsScope (Preferences.CloseSecurityTokenSessionsAfterMount);
 
-					shared_ptr <VolumeInfo> volume = MountVolume (options);
-
-					if (prefs.CloseSecurityTokenSessionsAfterMount)
-						Preferences.CloseSecurityTokenSessionsAfterMount = true;
+					shared_ptr <VolumeInfo> volume = MountVolume (favoriteOptions);
 
 					if (!volume)
 						break;
@@ -847,8 +881,9 @@ namespace VeraCrypt
 		return newMountedVolumes;
 	}
 
-	shared_ptr <VolumeInfo> UserInterface::MountVolume (MountOptions &options) const
+	shared_ptr <VolumeInfo> UserInterface::MountVolume (MountOptions &options, bool tryCachedPasswords) const
 	{
+		(void) tryCachedPasswords;
 		shared_ptr <VolumeInfo> volume;
 
 		try
@@ -1118,6 +1153,9 @@ const FileManager fileManagers[] = {
 				cmdLine.ArgMountOptions.Pim = cmdLine.ArgPim;
 				cmdLine.ArgMountOptions.Keyfiles = cmdLine.ArgKeyfiles;
 				cmdLine.ArgMountOptions.SharedAccessAllowed = cmdLine.ArgForce;
+				cmdLine.ArgMountOptions.EMVSupportEnabled =
+					Application::GetUserInterfaceType() == UserInterfaceType::Text
+					|| GetPreferences().EMVSupportEnabled;
 				if (cmdLine.ArgHash)
 				{
 					cmdLine.ArgMountOptions.Kdf = cmdLine.ArgHash;
@@ -1131,17 +1169,21 @@ const FileManager fileManagers[] = {
 				case CommandId::AutoMountFavorites:
 				case CommandId::AutoMountDevicesFavorites:
 					{
+						MountOptions autoMountOptions (cmdLine.ArgMountOptions);
+
 						if (cmdLine.ArgCommand == CommandId::AutoMountDevices || cmdLine.ArgCommand == CommandId::AutoMountDevicesFavorites)
 						{
+							MountOptions deviceMountOptions (autoMountOptions);
 							if (Preferences.NonInteractive)
-								mountedVolumes = UserInterface::MountAllDeviceHostedVolumes (cmdLine.ArgMountOptions);
+								mountedVolumes = UserInterface::MountAllDeviceHostedVolumes (deviceMountOptions);
 							else
-								mountedVolumes = MountAllDeviceHostedVolumes (cmdLine.ArgMountOptions);
+								mountedVolumes = MountAllDeviceHostedVolumes (deviceMountOptions);
 						}
 
 						if (cmdLine.ArgCommand == CommandId::AutoMountFavorites || cmdLine.ArgCommand == CommandId::AutoMountDevicesFavorites)
 						{
-							foreach (shared_ptr <VolumeInfo> v, MountAllFavoriteVolumes(cmdLine.ArgMountOptions))
+							MountOptions favoriteMountOptions (autoMountOptions);
+							foreach (shared_ptr <VolumeInfo> v, MountAllFavoriteVolumes(favoriteMountOptions))
 								mountedVolumes.push_back (v);
 						}
 					}

@@ -848,6 +848,7 @@ namespace VeraCrypt
 					mountOptions.Pim = Pim;
 					mountOptions.Keyfiles = Keyfiles;
 					mountOptions.Kdf = Kdf;
+					mountOptions.EMVSupportEnabled = Gui->GetPreferences().EMVSupportEnabled;
 
 					shared_ptr <VolumeInfo> volume = Core->MountVolume (mountOptions);
 					finally_do_arg (shared_ptr <VolumeInfo>, volume, { Core->DismountVolume (finally_arg, true); });

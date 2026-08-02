@@ -62,7 +62,7 @@ namespace VeraCrypt
         virtual void ListSecurityTokenKeyfiles () const;
         virtual void ListEMVTokenKeyfiles () const;
 		virtual VolumeInfoList MountAllDeviceHostedVolumes (MountOptions &options) const;
-		virtual shared_ptr <VolumeInfo> MountVolume (MountOptions &options) const;
+		virtual shared_ptr <VolumeInfo> MountVolume (MountOptions &options, bool tryCachedPasswords = true) const;
 		virtual bool OnInit ();
 #ifndef TC_NO_GUI
 		virtual bool OnInitGui () { return true; }
